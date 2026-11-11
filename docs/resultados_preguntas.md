@@ -316,3 +316,116 @@ El uso combinado de CTE y la función analítica `LAG() OVER (PARTITION BY regio
 
 ---
 
+### Pregunta 4. Segmentación avanzada de clientes mediante RFM
+
+#### 1. Enunciado
+Construya un análisis RFM (Recency, Frequency, Monetary) para identificar los diferentes perfiles de clientes. Determine:
+- **Recency:** días desde la última compra de cada cliente, tomando como referencia la fecha máxima del dataset.
+- **Frequency:** cantidad de órdenes únicas realizadas.
+- **Monetary:** importe total de ventas acumuladas.
+- Clasificación de clientes mediante puntuaciones RFM.
+- Identificación de clientes de alto valor, recurrentes y en riesgo de abandono.  
+Defina y justifique los criterios utilizados para segmentar los clientes.
+
+#### 2. Descripción de la estrategia de solución y justificación de criterios
+1. **Cálculo de la fecha de referencia:** Se obtiene dinámicamente `MAX(order_date)` del dataset (`2017-12-30`) en una CTE `fecha_referencia`.
+2. **Agregación por cliente (`793` clientes únicos):**
+   - `Recency = DATEDIFF('2017-12-30', MAX(order_date))`
+   - `Frequency = COUNT(DISTINCT order_id)`
+   - `Monetary = ROUND(SUM(sales), 2)`
+3. **Asignación de puntuaciones por Quintiles (`NTILE(5)` de 1 a 5):**
+   - **Justificación estadística:** El uso de quintiles (`NTILE(5)`) divide la cartera de 793 clientes en 5 grupos de tamaño homogéneo (~158 clientes por quintil), evitando umbrales arbitrarios y adaptándose a la distribución asimétrica de las compras:
+     - `r_score = NTILE(5) OVER (ORDER BY recency_dias DESC)`: Los clientes con **menor** cantidad de días desde su última compra (`0` a `25` días) reciben el puntaje máximo **`5`**.
+     - `f_score = NTILE(5) OVER (ORDER BY frequency_ordenes ASC)`: Los clientes con **mayor** número de pedidos únicos (`8` a `17` órdenes) reciben el puntaje máximo **`5`**.
+     - `m_score = NTILE(5) OVER (ORDER BY monetary_ventas ASC)`: Los clientes con **mayor** facturación acumulada reciben el puntaje máximo **`5`**.
+4. **Criterios de Segmentación de Negocio:**
+   - **Alto Valor (`Champions`):** `r_score >= 4 AND f_score >= 4 AND m_score >= 4`. Compraron recientemente, con alta frecuencia y alto volumen monetario.
+   - **Clientes Recurrentes (`Loyal`):** `f_score >= 4 AND m_score >= 3` (no incluidos en Champions). Mantienen una frecuencia de compra sobresaliente y gasto sólido.
+   - **Potencial Alto Valor (`Big Spenders`):** `r_score >= 3 AND m_score >= 4` (con frecuencia media/baja). Realizan compras de alto ticket promedio recientemente y pueden convertirse en Champions si se incrementa su frecuencia.
+   - **En Riesgo de Abandono (`At Risk`):** `r_score <= 2 AND (f_score >= 3 OR m_score >= 3)`. Clientes que históricamente fueron frecuentes o rentables, pero llevan mucho tiempo sin comprar (~286 días en promedio).
+   - **Inactivos / Perdidos (`Hibernating`):** `r_score <= 2 AND f_score <= 2`. Clientes de bajo valor y larga inactividad (~378 días).
+   - **Clientes Regulares / Promedio:** Resto de combinaciones intermedias.
+
+#### 3. Consulta HiveQL desarrollada
+```sql
+USE db_superstore_mlinaja;
+
+WITH fecha_referencia AS (
+    SELECT MAX(order_date) AS max_fecha FROM superstore_analytics
+),
+rfm_metricas AS (
+    SELECT
+        s.customer_id,
+        MAX(s.customer_name)                        AS customer_name,
+        MAX(s.order_date)                           AS ultima_compra,
+        DATEDIFF(f.max_fecha, MAX(s.order_date))    AS recency_dias,
+        COUNT(DISTINCT s.order_id)                  AS frequency_ordenes,
+        ROUND(SUM(s.sales), 2)                      AS monetary_ventas
+    FROM superstore_analytics s
+    CROSS JOIN fecha_referencia f
+    GROUP BY s.customer_id, f.max_fecha
+),
+rfm_puntuaciones AS (
+    SELECT
+        *,
+        NTILE(5) OVER (ORDER BY recency_dias DESC)      AS r_score,
+        NTILE(5) OVER (ORDER BY frequency_ordenes ASC)  AS f_score,
+        NTILE(5) OVER (ORDER BY monetary_ventas ASC)    AS m_score
+    FROM rfm_metricas
+),
+rfm_segmentacion AS (
+    SELECT
+        *,
+        CONCAT(CAST(r_score AS STRING), CAST(f_score AS STRING), CAST(m_score AS STRING)) AS rfm_codigo,
+        CASE
+            WHEN r_score >= 4 AND f_score >= 4 AND m_score >= 4 THEN 'Alto Valor (Champions)'
+            WHEN f_score >= 4 AND m_score >= 3 THEN 'Clientes Recurrentes (Loyal)'
+            WHEN r_score >= 3 AND m_score >= 4 THEN 'Potencial Alto Valor (Big Spenders)'
+            WHEN r_score <= 2 AND (f_score >= 3 OR m_score >= 3) THEN 'En Riesgo de Abandono (At Risk)'
+            WHEN r_score <= 2 AND f_score <= 2 THEN 'Inactivos / Perdidos (Hibernating)'
+            ELSE 'Clientes Regulares / Promedio'
+        END AS perfil_rfm
+    FROM rfm_puntuaciones
+)
+SELECT
+    perfil_rfm,
+    COUNT(*)                                                        AS total_clientes,
+    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2)              AS pct_clientes,
+    ROUND(AVG(recency_dias), 1)                                     AS prom_recency_dias,
+    ROUND(AVG(frequency_ordenes), 2)                                AS prom_frequency,
+    ROUND(AVG(monetary_ventas), 2)                                  AS prom_monetary,
+    ROUND(SUM(monetary_ventas), 2)                                  AS ventas_totales_segmento
+FROM rfm_segmentacion
+GROUP BY perfil_rfm
+ORDER BY ventas_totales_segmento DESC;
+```
+
+#### 4. Evidencia de ejecución
+![Pregunta 4 - Segmentación RFM](../evidencias/p04_segmentacion_rfm.png)
+
+#### 5. Resultado obtenido
+
+**Distribución de la Cartera de Clientes por Segmento RFM (`793` clientes):**
+
+| Segmento RFM | Clientes | % Cartera | Recency Prom. (días) | Frequency Prom. (órdenes) | Monetary Prom. ($) | Ventas Totales Segmento ($) |
+|---|---|---|---|---|---|---|
+| **Clientes Recurrentes (Loyal)** | 168 | 21.19% | 115.1 | 8.58 | 4,153.16 | **697,731.26** |
+| **Alto Valor (Champions)** | 109 | 13.75% | **24.4** | **9.19** | **5,249.28** | **572,171.04** |
+| **En Riesgo de Abandono (At Risk)** | 128 | 16.14% | 286.1 | 5.69 | 2,678.10 | **342,796.81** |
+| **Potencial Alto Valor (Big Spenders)** | 59 | 7.44% | 45.8 | 5.10 | 5,447.38 | 321,395.21 |
+| **Clientes Regulares / Promedio** | 207 | 26.10% | 43.0 | 5.39 | 1,286.10 | 266,221.89 |
+| **Inactivos / Perdidos (Hibernating)** | 122 | 15.38% | 378.6 | 3.45 | 794.14 | 96,884.80 |
+
+**Ejemplos Destacados de Clientes Individuales Identificados:**
+- **Alto Valor (`Champions`):** `AB-10105` (*Adrian Barton*, RFM `455`, 41 días, 10 órdenes, `$14,473.57`), `KL-16645` (*Ken Lonsdale*, RFM `455`, 47 días, 12 órdenes, `$14,175.23`), `SE-20110` (*Sanjit Engle*, RFM `555`, 9 días, 11 órdenes, `$12,209.44`).
+- **Clientes Recurrentes (`Loyal`):** `SC-20095` (*Sanjit Chand*, RFM `155`, 9 órdenes, `$14,142.33`), `SV-20365` (*Seth Vernon*, RFM `355`, 10 órdenes, `$11,470.95`).
+- **En Riesgo de Abandono (`At Risk`):** `TC-20980` (*Tamara Chand*, RFM `135`, **399 días sin comprar**, 5 órdenes, `$19,052.22`), `BM-11140` (*Becky Martin*, RFM `125`, **307 días sin comprar**, 4 órdenes, `$11,789.63`).
+
+#### 6. Interpretación técnica en palabras del estudiante
+Al aplicar `NTILE(5)` sobre las tres dimensiones del modelo RFM, descubrimos que apenas el **34.94% de los clientes** (`109 Champions` + `168 Recurrentes = 277 clientes`) generan **`$1,269,902.30`**, lo que equivale al **55.28% de todos los ingresos de la compañía**. Más importante aún para la toma de decisiones es que existen **128 clientes en el segmento `En Riesgo de Abandono (At Risk)`** que representan `$342,796.81` en ventas históricas (incluyendo a la segunda mayor compradora de toda la empresa, *Tamara Chand* con `$19,052.22`, quien lleva 399 días inactiva).
+
+#### 7. Conclusión específica de la consulta
+La segmentación RFM permite focalizar el presupuesto de marketing relacional: fidelizar con programas VIP a los **109 clientes Champions** (`$5,249.28` de gasto medio y compra cada ~24 días) y activar de inmediato campañas de reactivación (*win-back*) sobre los **128 clientes en Riesgo de Abandono** antes de que pasen al estado de pérdida definitiva.
+
+---
+
