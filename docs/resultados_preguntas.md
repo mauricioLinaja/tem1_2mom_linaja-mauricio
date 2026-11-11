@@ -724,3 +724,130 @@ El negocio presenta alta estacionalidad de cuarto trimestre (Q4) y valles pronun
 
 ---
 
+### Pregunta 8. Análisis Pareto de ventas y rentabilidad
+
+#### 1. Enunciado
+Aplique la regla 80/20 para identificar la concentración comercial. Realice dos análisis independientes:
+- **a)** Determine qué cantidad de productos representa el 80% de las ventas acumuladas.
+- **b)** Determine qué cantidad de productos representa el 80% de las ganancias acumuladas.  
+Para ambos análisis:
+- Ordene los productos de mayor a menor contribución.
+- Calcule el porcentaje de participación individual.
+- Identifique los productos que concentran la mayor contribución económica.
+- Compare ambos resultados y explique las diferencias encontradas.
+
+#### 2. Descripción de la estrategia de solución
+Se agrupa el catálogo completo de **`1,862` productos únicos (`product_id`)** y se aplican funciones de ventana analíticas:
+- `SUM(metrica) OVER ()` para obtener el denominador global sin necesidad de *subqueries* adicionales.
+- `SUM(metrica) OVER (ORDER BY metrica DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` para calcular la suma acumulada progresiva y el porcentaje acumulado.
+- En el **análisis b) de ganancias**, dado que existen 304 productos deficitarios (`profit <= 0`) que restan utilidad al final de la cola, se calcula el Pareto bajo dos perspectivas complementarias de ingeniería financiera:
+  - **b.1) Sobre el universo de productos rentables (`profit > 0`, 1,558 productos que suman `$363,402.20` de ganancia bruta positiva):** evita que las pérdidas distorsionen el 100% de referencia.
+  - **b.2) Sobre la ganancia neta global (`$286,397.02` en los 1,862 productos):** muestra cuántos productos bastan para alcanzar el 80% de la utilidad neta final de la compañía.
+
+#### 3. Consulta HiveQL desarrollada
+```sql
+USE db_superstore_mlinaja;
+
+-- a) Análisis Pareto 80/20 de VENTAS ACUMULADAS
+WITH ventas_por_producto AS (
+    SELECT
+        product_id,
+        MAX(product_name)       AS product_name,
+        MAX(category)           AS category,
+        ROUND(SUM(sales), 2)    AS ventas_producto
+    FROM superstore_analytics
+    GROUP BY product_id
+),
+pareto_ventas AS (
+    SELECT
+        ROW_NUMBER() OVER (ORDER BY ventas_producto DESC) AS rnk,
+        product_id,
+        product_name,
+        category,
+        ventas_producto,
+        ROUND(ventas_producto * 100.0 / SUM(ventas_producto) OVER (), 2) AS participacion_pct,
+        ROUND(SUM(ventas_producto) OVER (ORDER BY ventas_producto DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 2) AS ventas_acumuladas,
+        ROUND(SUM(ventas_producto) OVER (ORDER BY ventas_producto DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) * 100.0 / SUM(ventas_producto) OVER (), 2) AS pct_acumulado
+    FROM ventas_por_producto
+)
+SELECT * FROM pareto_ventas ORDER BY rnk LIMIT 10;
+
+-- b) Análisis Pareto 80/20 de GANANCIAS ACUMULADAS
+WITH ganancias_por_producto AS (
+    SELECT
+        product_id,
+        MAX(product_name)       AS product_name,
+        MAX(category)           AS category,
+        ROUND(SUM(profit), 2)   AS ganancia_producto
+    FROM superstore_analytics
+    GROUP BY product_id
+    HAVING SUM(profit) > 0
+),
+pareto_ganancias AS (
+    SELECT
+        ROW_NUMBER() OVER (ORDER BY ganancia_producto DESC) AS rnk,
+        product_id,
+        product_name,
+        category,
+        ganancia_producto,
+        ROUND(ganancia_producto * 100.0 / SUM(ganancia_producto) OVER (), 2) AS participacion_pct,
+        ROUND(SUM(ganancia_producto) OVER (ORDER BY ganancia_producto DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 2) AS ganancia_acumulada,
+        ROUND(SUM(ganancia_producto) OVER (ORDER BY ganancia_producto DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) * 100.0 / SUM(ganancia_producto) OVER (), 2) AS pct_acumulado
+    FROM ganancias_por_producto
+)
+SELECT * FROM pareto_ganancias ORDER BY rnk LIMIT 10;
+```
+
+#### 4. Evidencia de ejecución
+![Pregunta 8 - Análisis Pareto 80/20](../evidencias/p08_analisis_pareto.png)
+
+#### 5. Resultado obtenido
+
+**Comparativa General de Concentración Pareto (80/20):**
+
+| Dimensión Analizada | Universo de Productos | Monto Total Base ($) | Monto al 80% ($) | Cantidad de Productos que generan el 80% | % del Catálogo Total (`1,862`) |
+|---|---|---|---|---|---|
+| **a) Ventas Acumuladas** | `1,862` productos | `$2,297,200.86` | `$1,837,760.69` | **`414` productos** | **`22.23%`** |
+| **b.1) Ganancias Positivas (`profit > 0`)** | `1,558` productos rentables | `$363,402.20` | `$290,721.76` | **`340` productos** | **`18.26%`** (`21.82%` de los rentables) |
+| **b.2) Ganancia Neta Global (incluyendo pérdidas)** | `1,862` productos | `$286,397.02` | `$229,117.62` | **`164` productos** | **`8.81%`** |
+
+**Top 10 Productos de Mayor Contribución a las Ventas (Análisis 8.a):**
+
+| # | Product ID | Nombre del Producto | Categoría | Ventas ($) | Part. Indiv. (%) | Ventas Acum. ($) | % Acum. |
+|---|---|---|---|---|---|---|---|
+| 1 | `TEC-CO-10004722` | Canon imageCLASS 2200 Advanced Copier | Technology | 61,599.82 | 2.68% | 61,599.82 | 2.68% |
+| 2 | `OFF-BI-10003527` | Fellowes PB500 Electric Punch Binding Machine | Office Supplies | 27,453.38 | 1.20% | 89,053.20 | 3.88% |
+| 3 | `TEC-MA-10002412` | Cisco TelePresence System EX90 Videoconferencing | Technology | 22,638.48 | 0.99% | 111,691.68 | 4.86% |
+| 4 | `FUR-CH-10002024` | HON 5400 Series Task Chairs for Big and Tall | Furniture | 21,870.58 | 0.95% | 133,562.26 | 5.81% |
+| 5 | `OFF-BI-10001359` | GBC DocuBind TL300 Electric Binding System | Office Supplies | 19,823.48 | 0.86% | 153,385.74 | 6.68% |
+| 6 | `OFF-BI-10000545` | GBC Ibimaster 500 Manual ProClick Binding System | Office Supplies | 19,024.50 | 0.83% | 172,410.24 | 7.51% |
+| 7 | `TEC-CO-10001449` | Hewlett Packard LaserJet 3310 Copier | Technology | 18,839.69 | 0.82% | 191,249.93 | 8.33% |
+| 8 | `TEC-MA-10001127` | HP Designjet T520 Inkjet Large Format Printer | Technology | 18,374.90 | 0.80% | 209,624.83 | 9.13% |
+| 9 | `OFF-BI-10004995` | GBC DocuBind P400 Electric Binding System | Office Supplies | 17,965.07 | 0.78% | 227,589.90 | 9.91% |
+| 10 | `OFF-SU-10000151` | High Speed Automatic Electric Letter Opener | Office Supplies | 17,030.31 | 0.74% | 244,620.21 | 10.65% |
+
+**Top 10 Productos de Mayor Contribución a las Ganancias (Análisis 8.b):**
+
+| # | Product ID | Nombre del Producto | Categoría | Ganancia ($) | Part. s/ Positivas (%) | Ganancia Acum. ($) | % Acum. Positivas |
+|---|---|---|---|---|---|---|---|
+| 1 | `TEC-CO-10004722` | Canon imageCLASS 2200 Advanced Copier | Technology | **25,199.93** | **6.94%** | 25,199.93 | 6.94% |
+| 2 | `OFF-BI-10003527` | Fellowes PB500 Electric Punch Binding Machine | Office Supplies | **7,753.04** | 2.14% | 32,952.97 | 9.07% |
+| 3 | `TEC-CO-10001449` | Hewlett Packard LaserJet 3310 Copier | Technology | **6,983.88** | 1.92% | 39,936.85 | 11.00% |
+| 4 | `TEC-CO-10003763` | Canon PC1060 Personal Laser Copier | Technology | **4,570.93** | 1.26% | 44,507.78 | 12.26% |
+| 5 | `TEC-AC-10002049` | Plantronics Savi W720 Wireless Headset System | Technology | **4,425.34** | 1.22% | 48,933.12 | 13.48% |
+| 6 | `TEC-MA-10001127` | HP Designjet T520 Inkjet Large Format Printer | Technology | **4,094.98** | 1.13% | 53,028.10 | 14.60% |
+| 7 | `TEC-MA-10003979` | Ativa V4110MDD Micro-Cut Shredder | Technology | **3,772.95** | 1.04% | 56,801.05 | 15.64% |
+| 8 | `TEC-MA-10001047` | 3D Systems Cube Printer, 2nd Gen, Magenta | Technology | **3,717.97** | 1.02% | 60,519.02 | 16.67% |
+| 9 | `OFF-BI-10001120` | Ibico EPK-21 Electric Binding System | Office Supplies | **3,345.28** | 0.92% | 63,864.30 | 17.59% |
+| 10 | `TEC-MA-10000045` | Zebra ZM400 Thermal Label Printer | Technology | **3,343.54** | 0.92% | 67,207.84 | 18.51% |
+
+#### 6. Interpretación técnica y comparación de ambos resultados
+Al comparar el análisis Pareto de ventas frente al de ganancias se observan tres diferencias estructurales clave:
+1. **La concentración es mucho más extrema en las ganancias que en las ventas:**
+   - Para acumular el **80% de las ventas** se requieren **414 productos** (`22.23%` del catálogo de 1,862 productos), cumpliendo casi exactamente la proporción clásica 80/20 de Vilfredo Pareto.
+   - En cambio, para generar el **80% de las ganancias positivas** bastan **340 productos** (`18.26%` del catálogo total), y si se mide respecto a la **ganancia neta final (`$286,397.02`)**, apenas **164 productos (`8.81%` del catálogo)** ya acumulan el 80% de toda la utilidad neta de la empresa, porque los últimos 304 productos del catálogo restan `-$77,005.18` en pérdidas.
+2. **Peso individual del producto líder (`Canon imageCLASS 2200`):** Mientras que en ventas representa el `2.68%` de la facturación global, en ganancias concentra por sí solo el **`6.94%` de las ganancias positivas** (y el **`8.80%` de la utilidad neta total**).
+3. **Desaparición de productos de alto volumen pero margen nulo/negativo:** Productos que aparecen en el Top 11 de ventas como `Cisco TelePresence EX90` (Top 3 en ventas), `HON 5400 Task Chairs` (Top 4 en ventas) y `Lexmark MX611dhe` (Top 11 en ventas) desaparecen por completo del Pareto de ganancias porque sus descuentos excesivos los vuelven deficitarios.
+
+#### 7. Conclusión específica de la consulta
+La ley de Pareto 80/20 se cumple con alta precisión en el catálogo de Superstore (`22.23%` de los productos generan el `80%` de las ventas y `18.26%` generan el `80%` de las ganancias brutas positivas). La gerencia debe proteger el stock y nivel de servicio (*fill rate* del 99%) sobre los **340 productos Clase A de ganancia** y depurar los **304 productos destructores de valor**.
