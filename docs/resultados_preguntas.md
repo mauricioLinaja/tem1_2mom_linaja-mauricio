@@ -544,3 +544,84 @@ La empresa debe potenciar comercialmente las copiadoras `Canon imageCLASS 2200` 
 
 ---
 
+### Pregunta 6. Análisis del impacto de los descuentos
+
+#### 1. Enunciado
+Analice la relación entre los descuentos comerciales y la rentabilidad. Clasifique los registros en los siguientes rangos:
+- Sin descuento: `0`.
+- Descuento bajo: mayor a `0` y hasta `20%`.
+- Descuento medio: mayor a `20%` y hasta `50%`.
+- Descuento alto: mayor a `50%`.  
+Calcule: Ventas y ganancias por rango, margen de rentabilidad, cantidad de registros con pérdidas, porcentaje de registros no rentables, descuento promedio, categorías y subcategorías más afectadas. Finalmente, identifique si los descuentos elevados están asociados con una mayor proporción de operaciones no rentables.
+
+#### 2. Descripción de la estrategia de solución
+Se emplea una CTE que evalúa el campo `discount` mediante una expresión `CASE WHEN` en los cuatro intervalos exactos solicitados (`0`, `(0, 0.20]`, `(0.20, 0.50]` y `> 0.50`). Luego se agregan las ventas, ganancias, margen porcentual, descuento promedio (`AVG(discount)*100`), conteo condicional de operaciones con pérdida (`SUM(CASE WHEN profit < 0 THEN 1 ELSE 0 END)`) y su proporción sobre el total de operaciones del rango. En una segunda consulta complementaria se desglosa el impacto por `category` y `sub_category`.
+
+#### 3. Consulta HiveQL desarrollada
+```sql
+USE db_superstore_mlinaja;
+
+WITH clasificacion_descuentos AS (
+    SELECT
+        *,
+        CASE
+            WHEN discount = 0 THEN '1. Sin descuento (0%)'
+            WHEN discount > 0 AND discount <= 0.20 THEN '2. Descuento bajo (>0% a 20%)'
+            WHEN discount > 0.20 AND discount <= 0.50 THEN '3. Descuento medio (>20% a 50%)'
+            WHEN discount > 0.50 THEN '4. Descuento alto (>50%)'
+        END AS rango_descuento
+    FROM superstore_analytics
+)
+SELECT
+    rango_descuento,
+    COUNT(*)                                                        AS total_registros,
+    ROUND(AVG(discount) * 100, 2)                                   AS descuento_promedio_pct,
+    ROUND(SUM(sales), 2)                                            AS ventas_totales,
+    ROUND(SUM(profit), 2)                                           AS ganancia_total,
+    ROUND((SUM(profit) / SUM(sales)) * 100, 2)                      AS margen_rentabilidad_pct,
+    SUM(CASE WHEN profit < 0 THEN 1 ELSE 0 END)                     AS registros_con_perdidas,
+    ROUND(SUM(CASE WHEN profit < 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS pct_registros_no_rentables
+FROM clasificacion_descuentos
+GROUP BY rango_descuento
+ORDER BY rango_descuento;
+```
+
+#### 4. Evidencia de ejecución
+![Pregunta 6 - Impacto de los Descuentos](../evidencias/p06_impacto_descuentos.png)
+
+#### 5. Resultado obtenido
+
+**Impacto Económico por Rango de Descuento:**
+
+| Rango de Descuento | Registros | Descuento Prom. (%) | Ventas Totales ($) | Ganancia Total ($) | Margen (%) | Registros con Pérdida | % No Rentables |
+|---|---|---|---|---|---|---|---|
+| **1. Sin descuento (0%)** | 4,798 | 0.00% | 1,087,908.47 | **+320,987.60** | **+29.51%** | **0** | **0.00%** |
+| **2. Descuento bajo (>0% a 20%)** | 3,803 | 19.68% | 846,522.24 | **+100,785.47** | **+11.91%** | 523 | 13.75% |
+| **3. Descuento medio (>20% a 50%)** | 537 | 36.70% | 298,541.41 | **-58,817.00** | **-19.70%** | 492 | **91.62%** |
+| **4. Descuento alto (>50%)** | 856 | 71.89% | 64,228.74 | **-76,559.05** | **-119.20%** | **856** | **100.00%** |
+| **TOTAL GLOBAL** | **9,994** | **15.62%** | **2,297,200.86** | **+286,397.02** | **+12.47%** | **1,871** | **18.72%** |
+
+**Categorías y Subcategorías Más Afectadas por los Descuentos:**
+
+| Categoría | Subcategoría | Operaciones | Desc. Promedio (%) | Operaciones con Pérdida | % Operaciones Pérdida | Ventas ($) | Ganancia Neta ($) | Margen (%) |
+|---|---|---|---|---|---|---|---|---|
+| **Furniture** | **Tables** | 319 | **26.13%** | 203 | **63.64%** | 206,965.53 | **-17,725.48** | **-8.56%** |
+| **Furniture** | **Bookcases** | 228 | **21.11%** | 109 | **47.81%** | 114,880.00 | **-3,472.56** | **-3.02%** |
+| **Office Supplies** | **Supplies** | 190 | 7.68% | 33 | 17.37% | 46,673.54 | **-1,189.10** | **-2.55%** |
+| **Technology** | **Machines** | 115 | **30.61%** | 44 | **38.26%** | 189,238.63 | +3,384.76 | +1.79% |
+| **Office Supplies** | **Binders** | 1,523 | **37.23%** | 613 | **40.25%** | 203,412.73 | +30,221.76 | +14.86% |
+
+#### 6. Interpretación técnica en palabras del estudiante
+Los resultados demuestran una relación directa, monotónica y altamente destructiva entre los descuentos superiores al 20% y la rentabilidad del negocio:
+1. **Sin descuento (`0%`):** El 100% de las 4,798 transacciones son rentables (`0` pérdidas), logrando un margen extraordinario del **`29.51%`** y generando `$320,987.60` de ganancia (más del 112% de la ganancia neta total de la empresa).
+2. **Descuento bajo (`>0% a 20%`):** El negocio aún es rentable con un margen del **`11.91%`** (`+$100,785.47`), aunque un `13.75%` de los registros ya empiezan a presentar pérdidas.
+3. **Punto de quiebre en el 20% (`Descuento medio >20% a 50%`):** La proporción de operaciones no rentables se dispara abruptamente al **`91.62%`** (492 de 537 ventas pierden dinero), destruyendo **`-$58,817.00`** de utilidad con un margen de `-19.70%`.
+4. **Descuento alto (`>50%`):** El **`100.00%`** de las 856 operaciones generan pérdidas (ni una sola venta es rentable), con un margen catastrófico de **`-119.20%`** (por cada dólar vendido en este tramo se pierde `$1.19` adicional), restando **`-$76,559.05`**.
+
+#### 7. Conclusión específica de la consulta
+**Sí, se confirma de manera concluyente que los descuentos elevados están directamente asociados con una proporción masiva de operaciones no rentables:** el 96.77% de todas las ventas con descuento mayor al 20% (`1,348` de `1,393` operaciones en los rangos medio y alto) producen pérdidas financieras, destruyendo en conjunto **`-$135,376.05`** de utilidad neta. Fijar un tope máximo de descuento del **20%** en las subcategorías críticas (`Tables`, `Bookcases`, `Machines` y `Binders`) incrementaría la ganancia neta de la empresa en más de un **47%**.
+
+---
+
+## BLOQUE III. ANALÍTICA AVANZADA
+
