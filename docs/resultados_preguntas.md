@@ -625,3 +625,102 @@ Los resultados demuestran una relación directa, monotónica y altamente destruc
 
 ## BLOQUE III. ANALÍTICA AVANZADA
 
+### Pregunta 7. Análisis de tendencias temporales
+
+#### 1. Enunciado
+Construya un análisis de evolución mensual de ventas y ganancias. Debe incluir:
+- Ventas y ganancias mensuales.
+- Variación porcentual respecto al mes anterior.
+- Comparación con el mismo mes del año anterior.
+- Promedio móvil de tres meses.
+- Identificación de los tres meses con mayor y menor volumen de ventas.  
+Utilice `LAG()`, funciones de ventana y agregaciones temporales.
+
+#### 2. Descripción de la estrategia de solución
+En la CTE `serie_mensual` se agrupan las transacciones por `YEAR(order_date)`, `MONTH(order_date)` y `DATE_FORMAT(order_date, 'yyyy-MM')`, obteniendo la serie completa y continua de **48 meses** (desde `2014-01` hasta `2017-12`). En la segunda CTE se aplican tres funciones de ventana sobre el orden cronológico `ORDER BY anio, mes`:
+1. `LAG(ventas_mensuales, 1) OVER (ORDER BY anio, mes)` para la variación porcentual respecto al mes inmediato anterior (**MoM %**).
+2. `LAG(ventas_mensuales, 12) OVER (ORDER BY anio, mes)` para comparar exactamente contra el mismo mes del año calendario anterior (**YoY %**).
+3. `AVG(ventas_mensuales) OVER (ORDER BY anio, mes ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)` para suavizar la volatilidad estacional mediante el **promedio móvil trimestral (3 meses)**.
+
+#### 3. Consulta HiveQL desarrollada
+```sql
+USE db_superstore_mlinaja;
+
+WITH serie_mensual AS (
+    SELECT
+        YEAR(order_date)                            AS anio,
+        MONTH(order_date)                           AS mes,
+        DATE_FORMAT(order_date, 'yyyy-MM')          AS periodo_ym,
+        ROUND(SUM(sales), 2)                        AS ventas_mensuales,
+        ROUND(SUM(profit), 2)                       AS ganancias_mensuales
+    FROM superstore_analytics
+    GROUP BY YEAR(order_date), MONTH(order_date), DATE_FORMAT(order_date, 'yyyy-MM')
+)
+SELECT
+    periodo_ym,
+    ventas_mensuales,
+    ganancias_mensuales,
+    LAG(ventas_mensuales, 1) OVER (ORDER BY anio, mes) AS ventas_mes_anterior,
+    ROUND(
+        (ventas_mensuales - LAG(ventas_mensuales, 1) OVER (ORDER BY anio, mes))
+        / LAG(ventas_mensuales, 1) OVER (ORDER BY anio, mes) * 100, 2
+    ) AS variacion_mes_anterior_pct,
+    LAG(ventas_mensuales, 12) OVER (ORDER BY anio, mes) AS ventas_mismo_mes_anio_ant,
+    ROUND(
+        (ventas_mensuales - LAG(ventas_mensuales, 12) OVER (ORDER BY anio, mes))
+        / LAG(ventas_mensuales, 12) OVER (ORDER BY anio, mes) * 100, 2
+    ) AS variacion_interanual_yoy_pct,
+    ROUND(
+        AVG(ventas_mensuales) OVER (
+            ORDER BY anio, mes
+            ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+        ), 2
+    ) AS promedio_movil_3m
+FROM serie_mensual
+ORDER BY anio, mes;
+```
+
+#### 4. Evidencia de ejecución
+![Pregunta 7 - Tendencias Temporales](../evidencias/p07_tendencias_temporales.png)
+
+#### 5. Resultado obtenido
+
+**Evolución Mensual del Último Año (2017) con Comparativa MoM, YoY y Promedio Móvil 3M:**
+
+| Periodo (`yyyy-MM`) | Ventas Mes ($) | Ganancia Mes ($) | Ventas Mes Ant. ($) | Var. MoM (%) | Ventas Año Ant. ($) | Var. YoY (%) | Promedio Móvil 3M ($) |
+|---|---|---|---|---|---|---|---|
+| **2017-01** | 43,971.37 | 7,140.44 | 96,999.04 | -54.67% | 18,542.49 | +137.14% | 73,460.79 |
+| **2017-02** | 20,301.13 | 1,613.87 | 43,971.37 | -53.83% | 22,978.82 | -11.65% | 53,757.18 |
+| **2017-03** | 58,872.35 | 14,751.89 | 20,301.13 | +190.00% | 51,715.88 | +13.84% | 41,048.28 |
+| **2017-04** | 36,521.54 | 933.29 | 58,872.35 | -37.96% | 38,750.04 | -5.75% | 38,565.01 |
+| **2017-05** | 44,261.11 | 6,342.58 | 36,521.54 | +21.19% | 56,987.73 | -22.33% | 46,551.67 |
+| **2017-06** | 52,981.73 | 8,223.34 | 44,261.11 | +19.70% | 40,344.53 | +31.32% | 44,588.13 |
+| **2017-07** | 45,264.42 | 6,952.62 | 52,981.73 | -14.57% | 39,261.96 | +15.29% | 47,502.42 |
+| **2017-08** | 63,120.89 | 9,040.96 | 45,264.42 | +39.45% | 31,115.37 | +102.86% | 53,789.01 |
+| **2017-09** | 87,866.65 | 10,991.56 | 63,120.89 | +39.20% | 73,410.02 | +19.69% | 65,417.32 |
+| **2017-10** | 77,776.92 | 9,275.28 | 87,866.65 | -11.48% | 59,687.75 | +30.31% | 76,254.82 |
+| **2017-11** | **118,447.83** | 9,690.10 | 77,776.92 | +52.29% | 79,411.97 | +49.16% | **94,697.13** |
+| **2017-12** | 83,829.32 | 8,483.35 | 118,447.83 | -29.23% | 96,999.04 | -13.58% | 93,351.36 |
+
+**Identificación de los 3 Meses con Mayor y Menor Volumen de Ventas (2014–2017):**
+
+| Clasificación | Periodo (`yyyy-MM`) | Ventas Mensuales ($) | Ganancias Mensuales ($) | Promedio Móvil 3M ($) |
+|---|---|---|---|---|
+| **Top 1 Mayor Volumen** | **`2017-11` (Noviembre 2017)** | **118,447.83** | 9,690.10 | 94,697.13 |
+| **Top 2 Mayor Volumen** | **`2016-12` (Diciembre 2016)** | **96,999.04** | 17,885.31 | 78,699.59 |
+| **Top 3 Mayor Volumen** | **`2017-09` (Septiembre 2017)** | **87,866.65** | 10,991.56 | 65,417.32 |
+| **Top 1 Menor Volumen** | **`2014-02` (Febrero 2014)** | **4,519.89** | 862.31 | 9,378.40 |
+| **Top 2 Menor Volumen** | **`2015-02` (Febrero 2015)** | **11,951.41** | 2,813.85 | 33,223.70 |
+| **Top 3 Menor Volumen** | **`2014-01` (Enero 2014)** | **14,236.90** | 2,450.19 | 14,236.90 |
+
+#### 6. Interpretación técnica en palabras del estudiante
+La serie temporal de 48 meses revela un patrón estacional muy marcado:
+- **Contracción sistemática en el primer bimestre (Enero–Febrero):** Los tres meses de menor facturación en toda la historia del dataset ocurrieron en enero y febrero (`2014-02` con `$4,519.89`, `2015-02` con `$11,951.41` y `2014-01` con `$14,236.90`). Cada mes de enero sufre una caída MoM superior al `-50%` respecto al cierre de diciembre previo.
+- **Aceleración en el último cuatrimestre (Septiembre–Diciembre):** Los tres picos históricos se concentran en campañas de regreso a clases/oficina (`2017-09` con `$87,866.65`) y cierre de año/Black Friday (`2016-12` con `$96,999.04` y el máximo absoluto en `2017-11` con `$118,447.83`).
+- El **promedio móvil de 3 meses** pasa de `$9,378.40` a inicios de 2014 hasta alcanzar **`$94,697.13`** a finales de 2017, confirmando una tendencia estructural alcista de largo plazo.
+
+#### 7. Conclusión específica de la consulta
+El negocio presenta alta estacionalidad de cuarto trimestre (Q4) y valles pronunciados en febrero; la planificación de inventario y capacidad logística debe reforzarse entre agosto y noviembre, mientras que en enero y febrero deben implementarse promociones de paquetes corporativos (sin superar el 20% de descuento) para estabilizar el flujo de caja.
+
+---
+
