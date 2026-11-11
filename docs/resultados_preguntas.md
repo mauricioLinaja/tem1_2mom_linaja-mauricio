@@ -222,3 +222,97 @@ Se establecieron e implementaron en [`sql/dml/02_data_cleaning_treatment.hql`](.
 
 ## BLOQUE II. PROCESAMIENTO Y CONSULTAS ANALÍTICAS
 
+### Pregunta 3. Análisis de evolución comercial por región
+
+#### 1. Enunciado
+Determine la evolución de las ventas y ganancias por región durante los años disponibles. Debe obtener:
+- Ventas totales por región y año.
+- Ganancia total por región y año.
+- Margen de rentabilidad.
+- Variación porcentual respecto al año anterior.
+- Identificación de la región con mejor y peor desempeño comercial.  
+Utilice CTE y funciones de ventana para resolver el problema.
+
+#### 2. Descripción de la estrategia de solución
+Se estructuró una consulta basada en una **Common Table Expression (`WITH ventas_region_anio AS (...)`)** que primero agrega las ventas (`SUM(sales)`), ganancias (`SUM(profit)`) y el margen porcentual (`SUM(profit)/SUM(sales)*100`) particionando por `region` y `YEAR(order_date)`. Posteriormente, en la consulta principal se aplica la función de ventana `LAG(ventas_totales, 1) OVER (PARTITION BY region ORDER BY anio)` para recuperar el valor del año inmediatamente anterior dentro de la misma región y calcular la tasa de variación interanual (`YoY %`). Finalmente, se emplea `RANK() OVER (ORDER BY ganancia_acumulada DESC)` para clasificar las regiones de mejor a peor desempeño global.
+
+#### 3. Consulta HiveQL desarrollada
+```sql
+USE db_superstore_mlinaja;
+
+WITH ventas_region_anio AS (
+    SELECT
+        region,
+        YEAR(order_date)                            AS anio,
+        ROUND(SUM(sales), 2)                        AS ventas_totales,
+        ROUND(SUM(profit), 2)                       AS ganancia_total,
+        ROUND((SUM(profit) / SUM(sales)) * 100, 2)  AS margen_rentabilidad_pct
+    FROM superstore_analytics
+    GROUP BY region, YEAR(order_date)
+)
+SELECT
+    region,
+    anio,
+    ventas_totales,
+    ganancia_total,
+    margen_rentabilidad_pct,
+    LAG(ventas_totales, 1) OVER (PARTITION BY region ORDER BY anio) AS ventas_anio_anterior,
+    ROUND(
+        (ventas_totales - LAG(ventas_totales, 1) OVER (PARTITION BY region ORDER BY anio))
+        / LAG(ventas_totales, 1) OVER (PARTITION BY region ORDER BY anio) * 100, 2
+    ) AS variacion_ventas_pct,
+    ROUND(
+        (ganancia_total - LAG(ganancia_total, 1) OVER (PARTITION BY region ORDER BY anio))
+        / ABS(LAG(ganancia_total, 1) OVER (PARTITION BY region ORDER BY anio)) * 100, 2
+    ) AS variacion_ganancia_pct
+FROM ventas_region_anio
+ORDER BY region, anio;
+```
+
+#### 4. Evidencia de ejecución
+![Pregunta 3 - Evolución Regional](../evidencias/p03_evolucion_regional.png)
+
+#### 5. Resultado obtenido
+
+**Evolución Anual por Región (2014–2017):**
+
+| Región | Año | Ventas Totales ($) | Ganancia Total ($) | Margen (%) | Ventas Año Ant. ($) | Variación Ventas (%) | Variación Ganancia (%) |
+|---|---|---|---|---|---|---|---|
+| **Central** | 2014 | 103,838.16 | 539.55 | 0.52% | NULL | NULL | NULL |
+| **Central** | 2015 | 102,874.22 | 11,716.80 | 11.39% | 103,838.16 | -0.93% | +2,071.59% |
+| **Central** | 2016 | 147,429.38 | 19,899.16 | 13.50% | 102,874.22 | +43.31% | +69.83% |
+| **Central** | 2017 | 147,098.13 | 7,550.84 | 5.13% | 147,429.38 | -0.22% | -62.05% |
+| **East** | 2014 | 128,680.46 | 17,059.61 | 13.26% | NULL | NULL | NULL |
+| **East** | 2015 | 156,332.06 | 21,091.01 | 13.49% | 128,680.46 | +21.49% | +23.63% |
+| **East** | 2016 | 180,685.82 | 20,141.60 | 11.15% | 156,332.06 | +15.58% | -4.50% |
+| **East** | 2017 | 213,082.90 | 33,230.56 | 15.60% | 180,685.82 | +17.93% | +64.98% |
+| **South** | 2014 | 103,845.84 | 11,879.12 | 11.44% | NULL | NULL | NULL |
+| **South** | 2015 | 71,359.98 | 8,318.59 | 11.66% | 103,845.84 | -31.28% | -29.97% |
+| **South** | 2016 | 93,610.22 | 17,702.81 | 18.91% | 71,359.98 | +31.18% | +112.81% |
+| **South** | 2017 | 122,905.86 | 8,848.91 | 7.20% | 93,610.22 | +31.30% | -50.01% |
+| **West** | 2014 | 147,883.03 | 20,065.69 | 13.57% | NULL | NULL | NULL |
+| **West** | 2015 | 139,966.25 | 20,492.19 | 14.64% | 147,883.03 | -5.35% | +2.13% |
+| **West** | 2016 | 187,480.18 | 24,051.61 | 12.83% | 139,966.25 | +33.95% | +17.37% |
+| **West** | 2017 | 250,128.37 | 43,808.96 | 17.51% | 187,480.18 | +33.42% | +82.15% |
+
+**Ranking Global de Desempeño Comercial por Región (2014–2017):**
+
+| Ranking | Región | Órdenes Únicas | Ventas Acumuladas ($) | Ganancia Acumulada ($) | Margen Global (%) | Desempeño Comercial |
+|---|---|---|---|---|---|---|
+| **1** | **West** | 1,611 | **725,457.82** | **108,418.45** | **14.94%** | **Mejor Desempeño Comercial (Ventas, Ganancia y Margen)** |
+| **2** | **East** | 1,401 | 678,781.24 | 91,522.78 | 13.48% | Segundo lugar con crecimiento ininterrumpido de ventas |
+| **3** | **South** | 822 | **391,721.91** | 46,749.43 | 11.93% | **Menor volumen de facturación bruta**, pero margen saludable |
+| **4** | **Central** | 1,175 | 501,239.89 | **39,706.36** | **7.92%** | **Peor Desempeño en Rentabilidad Neta y Margen** |
+
+#### 6. Interpretación técnica en palabras del estudiante
+El uso combinado de CTE y la función analítica `LAG() OVER (PARTITION BY region ORDER BY anio)` demuestra que **West** y **East** son los motores financieros de Superstore:
+- **East** fue la única región que incrementó sus ventas absolutamente todos los años (`+21.49%` en 2015, `+15.58%` en 2016 y `+17.93%` en 2017).
+- **West** alcanzó el récord histórico en 2017 con `$250,128.37` en ventas y `$43,808.96` en utilidades (`+82.15%` YoY en ganancia).
+- En contraste, **Central** y **South** sufrieron caídas severas de utilidad neta en 2017 (`-62.05%` en Central y `-50.01%` en South), a pesar de haber mantenido o aumentado sus ventas brutas, lo cual evidencia una erosión del margen causada por políticas de descuento agresivas en ese último año.
+
+#### 7. Conclusión específica de la consulta
+- **Mejor desempeño comercial:** La región **West**, líder indiscutible tanto en ventas acumuladas (`$725,457.82`), como en ganancia neta (`$108,418.45`) y margen de rentabilidad (`14.94%`).
+- **Peor desempeño comercial:** En términos de **rentabilidad y generación de valor**, la región **Central** tiene el peor desempeño (`$39,706.36` de ganancia y apenas `7.92%` de margen global, casi la mitad de West), mientras que **South** registra la menor facturación bruta (`$391,721.91`), pero supera a Central en ganancia neta por más de `$7,000`.
+
+---
+
