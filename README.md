@@ -1,33 +1,12 @@
-# Procesamiento y Análisis Avanzado con Apache Hive — Superstore Sales Dataset
 
-<p align="center">
-  <strong>UNIVERSIDAD DEL VALLE</strong><br>
-  <strong>EXAMEN PRÁCTICO INDIVIDUAL — 2DO MOMENTO</strong><br>
-  <em>Ingeniería de Datos, Consultas Analíticas Avanzadas (HiveQL), Optimización y Toma de Decisiones</em>
-</p>
 
----
-
-## 📋 Información del Proyecto
-
-| Campo | Detalle |
-|---|---|
-| **Repositorio Oficial** | `tem1_2mom_linaja-mauricio` |
-| **Estudiante** | Mauricio Waly Linaja Canty (`mlinaja`) |
-| **Dataset** | [Superstore Sales Dataset (`Sample - Superstore.csv`)](https://www.kaggle.com/datasets/vivek468/superstore-dataset-final) |
-| **Volumen de Datos** | `9,994` registros transaccionales · `21` columnas · `5,009` órdenes · `793` clientes · `1,862` productos |
-| **Motor Big Data** | Apache Hive `2.3.2` sobre Apache Hadoop HDFS (`Docker Compose`) |
-| **Base de Datos Hive** | `db_superstore_mlinaja` |
-
----
-
-## 🎯 1. Objetivo del Proyecto
+##  1. Objetivo del Proyecto
 
 Desarrollar una solución integral de ingeniería y análisis de datos utilizando **Apache Hive**, abarcando desde la inspección física del archivo CSV, diseño del modelo de almacenamiento en dos capas (*Staging* con `OpenCSVSerde` y *Analítica* en formato columnar `ORC`), auditoría de calidad e integridad de datos, hasta la construcción de consultas analíticas avanzadas en **HiveQL** (mediante `CTE`, funciones de ventana `LAG`, `NTILE`, `RANK`, `DENSE_RANK`, `ROW_NUMBER`, `SUM/AVG OVER`), técnicas de optimización física (Particionamiento dinámico, *Bucketing*, Vectorización y CBO) e interpretación estratégica para la toma de decisiones ejecutivas.
 
 ---
 
-## 📂 2. Estructura del Repositorio
+## 2. Estructura del Repositorio
 
 ```text
 tem1_2mom_linaja-mauricio/
@@ -38,8 +17,7 @@ tem1_2mom_linaja-mauricio/
 │   ├── diccionario_datos.md                            # Diccionario técnico de las 21 columnas, tipos Hive y restricciones
 │   ├── resultados_preguntas.md                         # Desarrollo completo de las preguntas (Formato Sección 5)
 │   ├── analisis_optimizacion.md                        # Análisis de optimización (ORC, Particiones, Bucketing, CBO)
-│   ├── conclusiones_generales.md                       # Conclusiones técnicas y estratégicas para toma de decisiones
-│   └── EXAMEN_2DO_MOMENTO_Apache_Hive_mlinaja.docx     # Informe consolidado en formato Word (.docx)
+│   └── conclusiones_generales.md                       # Conclusiones técnicas y estratégicas para toma de decisiones
 ├── sql/
 │   ├── ddl/
 │   │   ├── 01_create_database_and_staging.hql          # Creación de BD y tabla externa Staging con OpenCSVSerde
@@ -76,13 +54,13 @@ tem1_2mom_linaja-mauricio/
 
 ---
 
-## ⚙️ 3. Requisitos y Procedimiento de Ejecución
+##  3. Requisitos y Procedimiento de Ejecucion
 
-### 3.1 Requisitos Técnicos
+### 3.1 Requisitos Tecnicos
 - **Docker** y **Docker Compose** con el clúster de Apache Hadoop + Apache Hive (`docker-hive_hive-server_1`, `namenode`, `datanode`, `hive-metastore`).
 - Archivo de datos `data/Sample - Superstore.csv`.
 
-### 3.2 Paso a Paso de Ejecución en Apache Hive
+### 3.2 Paso a Paso de Ejecucion en Apache Hive
 
 1. **Copiar el dataset y los scripts al contenedor de Hive Server:**
    ```bash
@@ -104,7 +82,7 @@ tem1_2mom_linaja-mauricio/
    hive -f /opt/sql/dml/02_data_cleaning_treatment.hql
    ```
 
-4. **Ejecutar los scripts analíticos de las preguntas del examen:**
+4. **Ejecutar los scripts analiticos de las preguntas del examen:**
    ```bash
    hive -f /opt/sql/queries/pregunta_01_modelo_datos.hql
    hive -f /opt/sql/queries/pregunta_02_auditoria_calidad.hql
@@ -118,9 +96,9 @@ tem1_2mom_linaja-mauricio/
 
 ---
 
-## 📊 4. Resumen Ejecutivo de Soluciones y Resultados
+##  4. Resumen Ejecutivo de Soluciones y Resultados
 
-> 📄 **Nota:** El desarrollo íntegro paso a paso con el formato oficial de 7 puntos por pregunta se encuentra en [`docs/resultados_preguntas.md`](docs/resultados_preguntas.md).
+>  **Nota:** El desarrollo íntegro paso a paso con el formato oficial de 7 puntos por pregunta se encuentra también en [`docs/resultados_preguntas.md`](docs/resultados_preguntas.md).
 
 ### Bloque I — Ingeniería y Modelado de Datos
 
@@ -134,7 +112,7 @@ tem1_2mom_linaja-mauricio/
 
 ---
 
-#### Pregunta 2: Auditoría de Calidad e Integridad de Datos
+#### Pregunta 2: Auditoria de Calidad e Integridad de Datos
 - **Resultados de la consulta de auditoría:**
   - **Total de registros:** `9,994`
   - **Identificadores `row_id` duplicados:** `0`
@@ -209,7 +187,7 @@ Tomando como referencia la fecha máxima `2017-12-30` y clasificando a los `793`
 
 ---
 
-#### Pregunta 8: Análisis Pareto (80/20) de Ventas y Rentabilidad
+#### Pregunta 8: Analisis Pareto (80/20) de Ventas y Rentabilidad
 - **a) Concentración del 80% de las Ventas:** Se alcanza con **`414` productos** de los `1,862` del catálogo (**`22.23%`** del catálogo concentra el `80%` de las ventas).
 - **b) Concentración del 80% de las Ganancias:** Se alcanza con **`340` productos** dentro de los `1,558` productos rentables (**`18.26%`** del catálogo total concentra el `80%` de la ganancia bruta positiva, y solo **`164` productos (`8.81%`)** equivalen al `80%` de la ganancia neta global tras descontar los 304 productos que dan pérdida).
 
@@ -217,18 +195,3 @@ Tomando como referencia la fecha máxima `2017-12-30` y clasificando a los `793`
 
 ---
 
-## 🚀 5. Optimización en Apache Hive
-
-El análisis detallado de optimización física se encuentra en [`docs/analisis_optimizacion.md`](docs/analisis_optimizacion.md) e incluye:
-1. **Formato Columnar `ORC` con compresión `SNAPPY`** e índices *Bloom* (`-82.0%` de espacio en HDFS).
-2. **Particionamiento Dinámico** por `(anio_pedido INT, region STRING)` generando 16 particiones para *Partition Pruning*.
-3. **Bucketing** en 8 cubetas por `customer_id` ordenadas por `order_date` para acelerar agregaciones RFM.
-4. **Vectorización y Cost-Based Optimizer (`CBO`)** mediante estadísticas de tabla y columnas.
-
-![Evidencia Optimización](evidencias/p09_optimizacion_orc_particiones.png)
-
----
-
-## 📝 Declaración Académica
-
-Trabajo individual desarrollado y documentado por **Mauricio Waly Linaja Canty** para el Examen Práctico de 2do Momento en la **Universidad del Valle**.
