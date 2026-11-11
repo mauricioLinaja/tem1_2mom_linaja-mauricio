@@ -1,0 +1,14 @@
+# Archivos temporales del sistema y editores
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+*~
+.vscode/
+.idea/
+__pycache__/
+
+# Logs de ejecucion local de Hive / MapReduce
+*.log
+derby.log
+metastore_db/
