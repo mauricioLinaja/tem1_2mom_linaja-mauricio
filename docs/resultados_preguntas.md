@@ -429,3 +429,118 @@ La segmentación RFM permite focalizar el presupuesto de marketing relacional: f
 
 ---
 
+### Pregunta 5. Ranking de productos según rentabilidad
+
+#### 1. Enunciado
+Identifique los productos de mayor y menor desempeño económico. Determine:
+- Los cinco productos con mayor ganancia acumulada por categoría.
+- Los cinco productos con mayor volumen de ventas.
+- Los cinco productos con menor rentabilidad.
+- El margen de ganancia individual de cada producto.
+- La posición de cada producto dentro de su categoría.  
+Utilice `RANK()`, `DENSE_RANK()` y funciones de agregación acumulativa.
+
+#### 2. Descripción de la estrategia de solución
+Se consolida primero una CTE `metricas_producto` agrupando por `category` y `product_id` (usando `MAX(product_name)` para evitar duplicidades por cambios de descripción) y calculando las ventas totales (`SUM(sales)`), la ganancia acumulada (`SUM(profit)`) y el margen individual (`SUM(profit)/SUM(sales)*100`). Sobre esta CTE se aplican:
+- `RANK() OVER (PARTITION BY category ORDER BY ganancia_acumulada DESC)` y `DENSE_RANK() OVER (...)` para obtener la posición exacta de cada producto dentro de su categoría.
+- `SUM(ganancia_acumulada) OVER (PARTITION BY category ORDER BY ganancia_acumulada DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` como función de agregación acumulativa (*running total*).
+- Rankings globales ordenados por `ventas_totales DESC` (Top 5 mayor volumen de ventas) y por `ganancia_acumulada ASC` (Top 5 menor rentabilidad).
+
+#### 3. Consulta HiveQL desarrollada
+```sql
+USE db_superstore_mlinaja;
+
+WITH metricas_producto AS (
+    SELECT
+        category,
+        product_id,
+        MAX(product_name)                           AS product_name,
+        SUM(quantity)                               AS unidades_vendidas,
+        ROUND(SUM(sales), 2)                        AS ventas_totales,
+        ROUND(SUM(profit), 2)                       AS ganancia_acumulada,
+        ROUND((SUM(profit) / SUM(sales)) * 100, 2)  AS margen_ganancia_pct
+    FROM superstore_analytics
+    GROUP BY category, product_id
+),
+ranking_por_categoria AS (
+    SELECT
+        category,
+        product_id,
+        product_name,
+        unidades_vendidas,
+        ventas_totales,
+        ganancia_acumulada,
+        margen_ganancia_pct,
+        RANK() OVER (PARTITION BY category ORDER BY ganancia_acumulada DESC)       AS rnk_cat,
+        DENSE_RANK() OVER (PARTITION BY category ORDER BY ganancia_acumulada DESC) AS dense_rnk_cat,
+        ROUND(
+            SUM(ganancia_acumulada) OVER (
+                PARTITION BY category
+                ORDER BY ganancia_acumulada DESC
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ), 2
+        ) AS ganancia_acumulativa_cat
+    FROM metricas_producto
+)
+SELECT *
+FROM ranking_por_categoria
+WHERE rnk_cat <= 5
+ORDER BY category, rnk_cat;
+```
+
+#### 4. Evidencia de ejecución
+![Pregunta 5 - Ranking de Productos](../evidencias/p05_ranking_productos.png)
+
+#### 5. Resultado obtenido
+
+**A) Top 5 Productos con Mayor Ganancia Acumulada por Categoría:**
+
+| Categoría | Pos (`RANK` / `DENSE`) | Product ID | Nombre del Producto | Ventas ($) | Ganancia ($) | Margen (%) | Ganancia Acum. Cat ($) |
+|---|---|---|---|---|---|---|---|
+| **Furniture** | 1 / 1 | `FUR-CH-10000454` | Hon Deluxe Fabric Upholstered Stacking Chairs | 10,637.53 | **1,927.44** | 18.12% | 1,927.44 |
+| **Furniture** | 2 / 2 | `FUR-CH-10004063` | Global Deluxe High-Back Manager's Chair | 8,665.19 | **1,558.59** | 17.99% | 3,486.03 |
+| **Furniture** | 3 / 3 | `FUR-CH-10002320` | Hon Pagoda Stacking Chairs | 6,483.80 | **1,540.70** | 23.76% | 5,026.73 |
+| **Furniture** | 4 / 4 | `FUR-CH-10004086` | Hon 4070 Series Pagoda Armless Chairs | 8,431.00 | **1,388.63** | 16.47% | 6,415.36 |
+| **Furniture** | 5 / 5 | `FUR-CH-10001854` | Office Star - Professional Matrix Back Chair | 8,774.50 | **1,305.65** | 14.88% | 7,721.01 |
+| **Office Supplies** | 1 / 1 | `OFF-BI-10003527` | Fellowes PB500 Electric Punch Binding Machine | 27,453.38 | **7,753.04** | 28.24% | 7,753.04 |
+| **Office Supplies** | 2 / 2 | `OFF-BI-10001120` | Ibico EPK-21 Electric Binding System | 15,875.92 | **3,345.28** | 21.07% | 11,098.32 |
+| **Office Supplies** | 3 / 3 | `OFF-AP-10002945` | Honeywell Enviracaire Portable HEPA Air Cleaner | 11,304.44 | **3,247.02** | 28.72% | 14,345.34 |
+| **Office Supplies** | 4 / 4 | `OFF-BI-10003925` | Fellowes PB300 Plastic Comb Binding Machine | 8,070.19 | **2,518.06** | 31.20% | 16,863.40 |
+| **Office Supplies** | 5 / 5 | `OFF-BI-10004600` | Ibico Ibimaster 300 Manual Binding System | 7,985.38 | **2,318.34** | 29.03% | 19,181.74 |
+| **Technology** | 1 / 1 | `TEC-CO-10004722` | Canon imageCLASS 2200 Advanced Copier | 61,599.82 | **25,199.93** | **40.91%** | 25,199.93 |
+| **Technology** | 2 / 2 | `TEC-CO-10001449` | Hewlett Packard LaserJet 3310 Copier | 18,839.69 | **6,983.88** | 37.07% | 32,183.81 |
+| **Technology** | 3 / 3 | `TEC-CO-10003763` | Canon PC1060 Personal Laser Copier | 11,619.83 | **4,570.93** | 39.34% | 36,754.74 |
+| **Technology** | 4 / 4 | `TEC-AC-10002049` | Plantronics Savi W720 Wireless Headset System | 13,756.54 | **4,425.34** | 32.17% | 41,180.08 |
+| **Technology** | 5 / 5 | `TEC-MA-10001127` | HP Designjet T520 Inkjet Large Format Printer | 18,374.90 | **4,094.98** | 22.29% | 45,275.06 |
+
+**B) Top 5 Productos con Mayor Volumen de Ventas:**
+
+| Rank | Categoría | Product ID | Nombre del Producto | Unidades | Ventas Totales ($) | Ganancia ($) | Margen (%) |
+|---|---|---|---|---|---|---|---|
+| **1** | Technology | `TEC-CO-10004722` | Canon imageCLASS 2200 Advanced Copier | 20 | **61,599.82** | 25,199.93 | +40.91% |
+| **2** | Office Supplies | `OFF-BI-10003527` | Fellowes PB500 Electric Punch Binding Machine | 31 | **27,453.38** | 7,753.04 | +28.24% |
+| **3** | Technology | `TEC-MA-10002412` | Cisco TelePresence System EX90 Videoconferencing | 6 | **22,638.48** | **-1,811.08** | **-8.00%** |
+| **4** | Furniture | `FUR-CH-10002024` | HON 5400 Series Task Chairs for Big and Tall | 39 | **21,870.58** | **0.00** | **0.00%** |
+| **5** | Office Supplies | `OFF-BI-10001359` | GBC DocuBind TL300 Electric Binding System | 37 | **19,823.48** | 2,233.51 | +11.27% |
+
+**C) Top 5 Productos con Menor Rentabilidad (Mayores Pérdidas):**
+
+| Rank | Categoría | Product ID | Nombre del Producto | Unidades | Ventas Totales ($) | Pérdida Acum. ($) | Margen (%) |
+|---|---|---|---|---|---|---|---|
+| **1** | Technology | `TEC-MA-10000418` | Cubify CubeX 3D Printer Double Head Print | 9 | 11,099.96 | **-8,879.97** | **-80.00%** |
+| **2** | Technology | `TEC-MA-10000822` | Lexmark MX611dhe Monochrome Laser Printer | 18 | 16,829.90 | **-4,589.97** | -27.27% |
+| **3** | Technology | `TEC-MA-10004125` | Cubify CubeX 3D Printer Triple Head Print | 4 | 7,999.98 | **-3,839.99** | -48.00% |
+| **4** | Furniture | `FUR-TA-10000198` | Chromcraft Bull-Nose Wood Oval Conference Tables | 27 | 9,917.64 | **-2,876.12** | -29.00% |
+| **5** | Furniture | `FUR-TA-10001889` | Bush Advantage Collection Racetrack Table | 33 | 9,544.73 | **-1,934.40** | -20.27% |
+
+#### 6. Interpretación técnica en palabras del estudiante
+El cruce entre el ranking de ventas y el ranking de rentabilidad revela una asimetría crítica:
+1. En **Furniture**, los 5 productos más rentables son exclusivamente **sillas (`FUR-CH-*`)**, acumulando entre los cinco `$7,721.01`, mientras que las **mesas (`FUR-TA-*`)** protagonizan el ranking de mayores pérdidas.
+2. Un alto volumen de ventas **no garantiza rentabilidad**: el 3er producto más vendido de toda la empresa (`Cisco TelePresence System EX90`, con `$22,638.48` en ventas) generó una pérdida neta de **`-$1,811.08`** (`-8.00%` de margen), y el 4to más vendido (`HON 5400 Series Task Chairs`, `$21,870.58`) tuvo **`$0.00`** de ganancia neta (`0.00%` de margen).
+3. Las impresoras 3D `Cubify CubeX` (modelos Double Head y Triple Head) ocasionan por sí solas una pérdida combinada de **`-$12,719.96`**.
+
+#### 7. Conclusión específica de la consulta
+La empresa debe potenciar comercialmente las copiadoras `Canon imageCLASS 2200` (`40.91%` de margen) y encuadernadoras `Fellowes`/`Ibico`, y auditar o retirar del esquema de descuentos las impresoras 3D `Cubify CubeX`, el equipo `Cisco TelePresence EX90` y las mesas de conferencia `Chromcraft` y `Bush`.
+
+---
+
