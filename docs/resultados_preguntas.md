@@ -129,3 +129,96 @@ El diseño en dos capas (Staging `OpenCSVSerde` + Analítica `ORC` con tipos `DA
 
 ---
 
+### Pregunta 2. Auditoria de calidad e integridad de datos
+
+#### 1. Enunciado
+Realice un análisis de calidad sobre el dataset. Determine:
+- Cantidad total de registros.
+- Cantidad de identificadores de fila duplicados.
+- Cantidad de órdenes únicas y clientes únicos.
+- Campos que contienen valores NULL.
+- Registros con fechas inválidas o inconsistentes.
+- Registros con ventas iguales o inferiores a cero.
+- Registros con descuentos fuera del intervalo esperado.
+- Registros donde la fecha de envío sea anterior a la fecha de pedido.  
+Construya una consulta que permita obtener un resumen de calidad de datos y proponga criterios de tratamiento para las inconsistencias identificadas.
+
+#### 2. Descripción de la estrategia de solución
+Se construyó una consulta de agregación condicional en una sola pasada (`Single-Pass Table Scan`) empleando `COUNT(*)`, `COUNT(DISTINCT ...)` y expresiones `SUM(CASE WHEN ... THEN 1 ELSE 0 END)` para evaluar todas las reglas de validación estructural y de dominio sobre `superstore_analytics`. Adicionalmente, para ir más allá de la validación superficial de `row_id`, se ejecutaron dos auditorías semánticas de negocio:
+1. Verificar si existen líneas con el mismo par `(order_id, product_id)` repetido dentro de un mismo pedido.
+2. Verificar si existen filas 100% idénticas en todos sus atributos de negocio pero con distinto `row_id`.
+
+#### 3. Consulta HiveQL desarrollada
+```sql
+USE db_superstore_mlinaja;
+
+-- 1. Resumen general de calidad e integridad de datos
+SELECT
+    COUNT(*)                                                                AS total_registros,
+    COUNT(*) - COUNT(DISTINCT row_id)                                       AS row_id_duplicados,
+    COUNT(DISTINCT order_id)                                                AS ordenes_unicas,
+    COUNT(DISTINCT customer_id)                                             AS clientes_unicos,
+    SUM(CASE WHEN row_id IS NULL OR order_id IS NULL OR order_date IS NULL
+              OR ship_date IS NULL OR ship_mode IS NULL OR customer_id IS NULL
+              OR customer_name IS NULL OR segment IS NULL OR country IS NULL
+              OR city IS NULL OR state IS NULL OR postal_code IS NULL
+              OR region IS NULL OR product_id IS NULL OR category IS NULL
+              OR sub_category IS NULL OR product_name IS NULL OR sales IS NULL
+              OR quantity IS NULL OR discount IS NULL OR profit IS NULL
+             THEN 1 ELSE 0 END)                                             AS registros_con_null,
+    SUM(CASE WHEN order_date IS NULL OR ship_date IS NULL THEN 1 ELSE 0 END) AS fechas_invalidas,
+    SUM(CASE WHEN sales <= 0 THEN 1 ELSE 0 END)                             AS ventas_menores_iguales_cero,
+    SUM(CASE WHEN discount < 0 OR discount > 1 THEN 1 ELSE 0 END)           AS descuentos_fuera_intervalo,
+    SUM(CASE WHEN ship_date < order_date THEN 1 ELSE 0 END)                 AS envio_anterior_a_pedido,
+    SUM(CASE WHEN profit < 0 THEN 1 ELSE 0 END)                             AS registros_con_perdida
+FROM superstore_analytics;
+
+-- 2. Auditoría semántica: Pares (order_id, product_id) repetidos en un mismo pedido
+SELECT
+    order_id,
+    product_id,
+    COUNT(*) AS repeticiones
+FROM superstore_analytics
+GROUP BY order_id, product_id
+HAVING COUNT(*) > 1;
+```
+
+#### 4. Evidencia de ejecución
+![Pregunta 2 - Auditoría de Calidad](../evidencias/p02_auditoria_calidad.png)
+
+#### 5. Resultado obtenido
+
+**Resumen de Calidad Primaria:**
+
+| Métrica Auditada | Valor Obtenido | Estado |
+|---|---|---|
+| **Cantidad total de registros** | `9,994` | Completo |
+| **Identificadores de fila (`row_id`) duplicados** | `0` | Íntegro (`1` a `9,994`) |
+| **Órdenes únicas (`order_id`)** | `5,009` | Promedio de `1.995` ítems/orden |
+| **Clientes únicos (`customer_id`)** | `793` | Promedio de `6.32` órdenes/cliente |
+| **Campos que contienen valores `NULL`** | `0` | 0% nulos tras usar `OpenCSVSerde` |
+| **Registros con fechas inválidas o inconsistentes** | `0` | Rango `2014-01-03` a `2018-01-05` |
+| **Registros con ventas `<= 0`** | `0` | Mínimo: `$0.444`, Máximo: `$22,638.48` |
+| **Descuentos fuera del intervalo `[0.00, 1.00]`** | `0` | Rango real: `0.00` (0%) a `0.80` (80%) |
+| **Fecha de envío anterior a fecha de pedido (`ship_date < order_date`)** | `0` | Plazo de envío entre `0` y `7` días |
+| **Registros con ganancia negativa (`profit < 0`)** | `1,871` | `18.72%` de operaciones con pérdida |
+
+**Hallazgos de la Auditoría Semántica Profunda:**
+1. **Duplicado Transaccional Exacto (1 caso):** La orden `US-2014-150119` del cliente `Laurel Beltran` (`LB-16795`) para el producto `FUR-CH-10002965` aparece registrada dos veces con exactamente los mismos montos (`Sales = 281.372`, `Quantity = 2`, `Discount = 0.3`, `Profit = -12.0588`) en los `row_id` `3406` y `3407`.
+2. **Pares `(order_id, product_id)` repetidos en la misma orden (8 casos):** Existen 8 órdenes donde el mismo `product_id` se registró en dos líneas separadas de la misma factura (`CA-2015-103135`, `CA-2016-129714`, `CA-2016-137043`, `CA-2016-140571`, `CA-2017-118017`, `CA-2017-152912`, `US-2014-150119`, `US-2016-123750`).
+3. **Desajuste de cardinalidad en catálogo (`Product ID` vs `Product Name`):** Existen `1,862` códigos `product_id` distintos frente a `1,850` nombres `product_name` distintos (32 códigos comparten nombre o tienen descripciones actualizadas en el tiempo).
+
+#### 6. Interpretación técnica en palabras del estudiante
+A nivel técnico y de dominio, cuando el archivo se procesa correctamente mediante `OpenCSVSerde`, el dataset no presenta valores `NULL`, ni fechas corruptas, ni ventas negativas, ni envíos anteriores al pedido. Sin embargo, si un analista hubiera cargado el CSV con el delimitador simple por defecto (`FIELDS TERMINATED BY ','`), habrían aparecido **2,221 registros con fechas y montos nulos o desplazados** debido a las comas internas en `Product Name`. Además, la auditoría de grano fino reveló que aunque `row_id` es único, existe 1 registro duplicado exacto de negocio (`US-2014-150119`) y 32 códigos de producto con variación histórica de nombre.
+
+#### 7. Conclusión específica y Criterios de Tratamiento propuestos
+Se establecieron e implementaron en [`sql/dml/02_data_cleaning_treatment.hql`](../sql/dml/02_data_cleaning_treatment.hql) cuatro criterios formales de tratamiento:
+1. **Ingesta con `OpenCSVSerde`:** Obligatoria para prevenir los 2,221 falsos nulos por comas en textos entrecomillados.
+2. **Deduplicación de transacciones idénticas:** Uso de `ROW_NUMBER() OVER (PARTITION BY order_id, order_date, customer_id, product_id, sales, quantity, discount, profit ORDER BY row_id)` filtrando `dup_num = 1`.
+3. **Homologación de catálogo:** Agrupación de productos siempre por su llave natural `product_id` aplicando `MAX(product_name)` o `FIRST_VALUE(product_name)` para evitar fragmentar un mismo producto en dos filas.
+4. **Conservación de `profit < 0`:** Los 1,871 registros con ganancia negativa **no son errores de datos**, sino pérdidas comerciales reales ocasionadas por descuentos agresivos, por lo que deben conservarse íntegros para el análisis financiero.
+
+---
+
+## BLOQUE II. PROCESAMIENTO Y CONSULTAS ANALÍTICAS
+
